@@ -1,15 +1,15 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
 import plotly.express as px
+import plotly.graph_objects as go
 import joblib
 import os
-import json
-import hashlib
+import base64
+import streamlit.components.v1 as components
 from scipy.signal import butter, filtfilt, welch
 
-# === CONFIGURATION ===
+# === CONFIG ===
 st.set_page_config(page_title="EEG Like/Dislike Classifier", page_icon="🧠", layout="wide")
 
 # === STYLE FUTURISTE ===
@@ -46,48 +46,50 @@ button:hover {
     color: #00fff7;
 }
 
+.css-1d391kg {
+    background-color: #0e1117;
+}
+
+.st-bb {
+    background-color: #0e1117;
+}
+
+.st-bc {
+    background-color: #0e1117;
+}
+
+a {
+    color: #00fff7;
+}
+
 footer {
     visibility: hidden;
+}
+/* Modification pour le mode clair */
+@media (prefers-color-scheme: light) {
+    button {
+        color: black !important;
+        background-color: #e0f7fa !important;
+        border-color: #00bcd4 !important;
+    }
+
+    button:hover {
+        background-color: #00bcd4 !important;
+        color: white !important;
+    }
 }
 </style>
 """, unsafe_allow_html=True)
 
-# === CONSTANTES ===
+
+# === CONSTANTS ===
 FS = 250
 CHANNELS = ['Fp1', 'Fp2', 'F3', 'F4', 'Fz', 'Cz', 'C3', 'C4', 'T7', 'T8', 'O1', 'O2', 'Pz', 'POz']
 BANDS = {'delta': (0.5, 4), 'theta': (4, 8), 'alpha': (8, 12), 'beta': (12, 30), 'gamma': (30, 45)}
 MODEL_PATH = r'C:\Users\21628\Desktop\eeg_project\eeg_rf_model.joblib'
+RESULTS_FILE = "results.csv"
 
-# === GESTION DES COMPTES ===
-USER_DATA_FILE = r'C:\Users\21628\Desktop\eeg_project\users_data.json'
-
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
-def load_user_data():
-    try:
-        with open(USER_DATA_FILE, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
-
-def save_user_data(data):
-    with open(USER_DATA_FILE, 'w') as f:
-        json.dump(data, f)
-
-def register(username, password):
-    users = load_user_data()
-    if username in users:
-        return False
-    users[username] = {"password": hash_password(password)}
-    save_user_data(users)
-    return True
-
-def login(username, password):
-    users = load_user_data()
-    return username in users and users[username]["password"] == hash_password(password)
-
-# === TRAITEMENT EEG ===
+# === FUNCTIONS ===
 def bandpass(data, low=1, high=50, fs=FS, order=5):
     nyq = 0.5 * fs
     b, a = butter(order, [low/nyq, high/nyq], btype='band')
@@ -101,115 +103,255 @@ def bandpass_alpha(signal, fs=FS, order=5):
 
 def compute_bandpowers(signal, fs=FS):
     freqs, psd = welch(signal, fs=fs, nperseg=fs)
-    powers = {band: np.trapz(psd[(freqs >= low) & (freqs <= high)], freqs[(freqs >= low) & (freqs <= high)]) for band, (low, high) in BANDS.items()}
+    powers = {}
+    for band, (low, high) in BANDS.items():
+        idx = np.logical_and(freqs >= low, freqs <= high)
+        powers[band] = np.trapz(psd[idx], freqs[idx])
     return powers
 
 def extract_features(eeg):
     features = []
+    bandpower_list = []
     for ch in range(eeg.shape[1]):
-        signal = bandpass(eeg[:, ch])
-        features.extend([np.mean(signal), np.std(signal)] + list(compute_bandpowers(signal).values()))
-    return features
+        signal = eeg[:, ch]
+        signal = bandpass(signal)
+        mean_val = np.mean(signal)
+        std_val = np.std(signal)
+        bandpowers = compute_bandpowers(signal)
+        features.extend([mean_val, std_val] + list(bandpowers.values()))
+        bandpower_list.append(bandpowers)
+    return features, bandpower_list
 
 def predict_eeg(features):
     model = joblib.load(MODEL_PATH)
     features = np.array(features).reshape(1, -1)
-    return model.predict(features)[0], model.predict_proba(features)[0]
+    prediction = model.predict(features)[0]
+    confidence = model.predict_proba(features)[0]
+    return prediction, confidence
+
+# def play_sound():
+#     sound_file = "sounds/blop.mp3"
+#     if os.path.exists(sound_file):
+#         with open(sound_file, "rb") as audio_file:
+#             audio_bytes = audio_file.read()
+#             b64 = base64.b64encode(audio_bytes).decode()
+#             md = f"""
+#             <audio autoplay>
+#             <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+#             </audio>
+#             """
+#             st.markdown(md, unsafe_allow_html=True)
 
 # === INTERFACE ===
 st.title("🧠 EEG Like/Dislike Classifier")
+st.markdown("### Découvrez vos émotions grâce à votre cerveau... 🌟")
 
-# Connexion / inscription
-if 'logged_in' not in st.session_state:
-    st.session_state['logged_in'] = False
-    st.session_state['username'] = None
-    st.session_state['user_stats'] = {"like": 0, "dislike": 0}
+menu = st.sidebar.selectbox("Navigation", ["Accueil", "Prédiction", "Statistiques"])
 
-if not st.session_state['logged_in']:
-    option = st.sidebar.selectbox("Action", ["Inscription", "Connexion"])
-    username = st.text_input("Nom d'utilisateur")
-    password = st.text_input("Mot de passe", type="password")
-    if option == "Inscription":
-        confirm_password = st.text_input("Confirmer le mot de passe", type="password")
-        if st.button("S'inscrire"):
-            if password == confirm_password:
-                if register(username, password):
-                    st.session_state['logged_in'] = True
-                    st.session_state['username'] = username
-                    st.success("Inscription réussie. Connecté.")
-                    st.rerun()
-                else:
-                    st.error("Nom d'utilisateur déjà pris.")
-            else:
-                st.error("Les mots de passe ne correspondent pas.")
-    else:
-        if st.button("Se connecter"):
-            if login(username, password):
-                st.session_state['logged_in'] = True
-                st.session_state['username'] = username
-                st.success("Connexion réussie.")
-                st.rerun()
-            else:
-                st.error("Identifiants incorrects.")
-else:
-    st.sidebar.write(f"Bienvenue, {st.session_state['username']}")
-    if st.sidebar.button("Se déconnecter"):
-        st.session_state['logged_in'] = False
-        st.session_state['username'] = None
-        st.session_state['user_stats'] = {"like": 0, "dislike": 0}
-        st.rerun()
+if menu == "Accueil":
+    st.header("Présentation du Projet 🎯")
+    st.markdown("""
+Ce projet vise à **classer les réactions émotionnelles** (**LIKE** ou **DISLIKE**) à partir de **signaux EEG** enregistrés chez différents utilisateurs.
 
-    menu = st.sidebar.radio("Navigation", ["Accueil", "Prédiction", "Statistiques"])
+Grâce aux techniques de **filtrage du signal**, **extraction de caractéristiques EEG** et **modèles de machine learning (Random Forest)**, nous réalisons une prédiction automatique des préférences cérébrales.
 
-    if menu == "Accueil":
-        st.markdown("""
-        ## 🎯 Objectif
-        Classer les émotions EEG en LIKE ou DISLIKE à l'aide d'un modèle Random Forest.
-        """)
+### 🛠️ Technologies utilisées :
+- Python
+- Streamlit
+- Scikit-Learn
+- SciPy
+- Plotly
 
-    elif menu == "Prédiction":
-        uploaded_file = st.file_uploader("Importer un fichier EEG (.txt)", type=["txt"])
-        if uploaded_file:
-            eeg = pd.read_csv(uploaded_file, sep=' ', header=None)
+### 📈 Pipeline de traitement :
+1. Importation fichier EEG (.txt)
+2. Filtrage (1–50 Hz)
+3. Extraction bandpowers
+4. Modélisation Random Forest
+5. Prédiction LIKE/DISLIKE
+
+### 👨‍💻 Réalisé par :
+- Ahmed Mlika — ahmedmlika@gmail.com
+- Omar Moussa — omarmoussa967@gmail.com
+
+Université : **ISSATS Sousse**
+
+🌟 Merci pour votre attention !
+""")
+elif menu == "Prédiction":
+    uploaded_file = st.file_uploader("Importer un fichier EEG (.txt)", type=["txt"])
+    if uploaded_file is not None:
+        with st.spinner('Analyse en cours... 🧠'):
+            eeg = pd.read_csv(uploaded_file, sep=' ', header=None, engine='python')
             if eeg.shape[1] != 14:
-                st.error("Le fichier doit contenir 14 canaux EEG.")
+                st.error("Le fichier doit avoir 14 canaux EEG.")
             else:
                 eeg.columns = CHANNELS
-                features = extract_features(eeg.values)
+                features, bandpowers_all = extract_features(eeg.values)
                 prediction, confidence = predict_eeg(features)
                 label = "LIKE" if prediction == 1 else "DISLIKE"
+                confidence_like = round(confidence[1]*100, 2)
+                confidence_dislike = round(confidence[0]*100, 2)
 
-                # Statistiques personnelles
-                if prediction == 1:
-                    st.session_state['user_stats']['like'] += 1
-                else:
-                    st.session_state['user_stats']['dislike'] += 1
+                st.success(f"Résultat : {label}")
+                st.metric(label="Confiance LIKE", value=f"{confidence_like}%")
+                st.metric(label="Confiance DISLIKE", value=f"{confidence_dislike}%")
+                
 
-                st.success(f"Prédiction : {label}")
-                st.metric("Confiance LIKE", f"{confidence[1]*100:.2f}%")
-                st.metric("Confiance DISLIKE", f"{confidence[0]*100:.2f}%")
+                # === GRAPHIQUES ===
+                st.subheader("Signal EEG Brut (toutes les électrodes)")
+                fig_raw = go.Figure()
+                for ch in CHANNELS:
+                    fig_raw.add_trace(go.Scatter(y=eeg[ch], mode='lines', name=ch))
+                fig_raw.update_layout(
+                    xaxis_title="Temps (ms)", 
+                    yaxis_title="Amplitude (μV)", 
+                    height=400
+                )
+                st.plotly_chart(fig_raw, use_container_width=True)
 
-                # Affichage des signaux Alpha F3 et F4
-                alpha_F3 = bandpass_alpha(eeg['F3'].values)
-                alpha_F4 = bandpass_alpha(eeg['F4'].values)
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(y=alpha_F3, mode='lines', name='F3 (Alpha)', line=dict(color='cyan')))
-                fig.add_trace(go.Scatter(y=alpha_F4, mode='lines', name='F4 (Alpha)', line=dict(color='magenta')))
-                fig.update_layout(title='Signaux Alpha - F3 et F4', xaxis_title='Échantillons', yaxis_title='Amplitude', template='plotly_dark')
-                st.plotly_chart(fig, use_container_width=True)
+                eeg_filtered = bandpass(eeg.values)
+                st.subheader("Signal EEG Filtré (1-50 Hz)")
+                fig_filt = go.Figure()
+                for idx, ch in enumerate(CHANNELS):
+                    fig_filt.add_trace(go.Scatter(y=eeg_filtered[:, idx], mode='lines', name=ch))
+                fig_filt.update_layout(
+                    xaxis_title="Temps (ms)", 
+                    yaxis_title="Amplitude (μV)", 
+                    height=400
+                )
+                st.plotly_chart(fig_filt, use_container_width=True)
 
-    elif menu == "Statistiques":
-        stats = st.session_state['user_stats']
-        st.metric("Nombre de LIKE", stats['like'])
-        st.metric("Nombre de DISLIKE", stats['dislike'])
+                f3_raw = eeg['F3']
+                f4_raw = eeg['F4']
+                f3_filt = bandpass_alpha(f3_raw)
+                f4_filt = bandpass_alpha(f4_raw)
 
-        fig = px.bar(
-            x=["LIKE", "DISLIKE"],
-            y=[stats['like'], stats['dislike']],
-            labels={'x': "Émotions", 'y': "Nombre de prédictions"},
-            color=["LIKE", "DISLIKE"],
-            color_discrete_map={"LIKE": "cyan", "DISLIKE": "magenta"},
-            title="Distribution des Prédictions"
+                def compute_fft(signal, fs=FS):
+                    n = len(signal)
+                    freqs = np.fft.fftfreq(n, d=1/fs)
+                    fft_values = np.fft.fft(signal)
+                    idx = np.where(freqs >= 0)
+                    return freqs[idx], np.abs(fft_values[idx])
+
+                freqs_f3, fft_f3 = compute_fft(f3_filt)
+                freqs_f4, fft_f4 = compute_fft(f4_filt)
+
+                st.subheader("Canal F3 Brut")
+                fig_f3_raw = px.line(y=f3_raw)
+                fig_f3_raw.update_layout(
+                    xaxis_title="Temps (ms)", 
+                    yaxis_title="Amplitude (μV)", 
+                    height=400
+                )
+                st.plotly_chart(fig_f3_raw, use_container_width=True)
+
+                st.subheader("Canal F3 Filtré")
+                fig_f3_filt = px.line(y=f3_filt)
+                
+                fig_f3_filt.update_layout(
+                    xaxis_title="Temps (ms)", 
+                    yaxis_title="Amplitude (μV)", 
+                    height=400
+                )
+                st.plotly_chart(fig_f3_filt, use_container_width=True)
+
+                st.subheader("Canal F4 Brut")
+                fig_f4_raw = px.line(y=f4_raw)
+                
+                fig_f4_raw.update_layout(
+                    xaxis_title="Temps (ms)", 
+                    yaxis_title="Amplitude (μV)", 
+                    height=400
+                )
+                st.plotly_chart(fig_f4_raw, use_container_width=True)
+                
+                st.subheader("Canal F4 Filtré")
+                fig_f4_filt = px.line(y=f4_filt)
+                
+                fig_f4_filt.update_layout(
+                    xaxis_title="Temps (ms)", 
+                    yaxis_title="Amplitude (μV)", 
+                    height=400
+                )
+                st.plotly_chart(fig_f4_filt, use_container_width=True)
+
+                st.subheader("Spectre de Fréquence - Alpha F3")
+                fig_fft_f3 = px.line(x=freqs_f3, y=fft_f3)
+                fig_fft_f3.update_layout(title="FFT Alpha F3 (8-12 Hz)")
+                fig_fft_f3.update_xaxes(range=[7,13])
+                
+                fig_fft_f3.update_layout(
+                    xaxis_title="Frequence(Hz)", 
+                    yaxis_title="Puissance(μV²)", 
+                    height=400
+                )
+                st.plotly_chart(fig_fft_f3, use_container_width=True)
+
+                st.subheader("Spectre de Fréquence - Alpha F4")
+                fig_fft_f4 = px.line(x=freqs_f4, y=fft_f4)
+                fig_fft_f4.update_layout(title="FFT Alpha F4 (8-12 Hz)")
+                fig_fft_f4.update_xaxes(range=[7,13])
+                
+                fig_fft_f4.update_layout(
+                    xaxis_title="Frequence(Hz)", 
+                    yaxis_title="Puissance(μV²)", 
+                    height=400
+                )
+                st.plotly_chart(fig_fft_f4, use_container_width=True)
+                
+                dt = 1 / FS
+                power_f3 = np.trapz(f3_filt ** 2, dx=dt)
+                power_f4 = np.trapz(f4_filt ** 2, dx=dt)
+
+                st.subheader("Comparaison Puissance Alpha F3 vs F4")
+                fig_compare = px.bar(
+                    x=["Alpha F3", "Alpha F4"],
+                    y=[power_f3, power_f4],
+                    color=["Alpha F3", "Alpha F4"],
+                    title="Taux de puissance Alpha"
+                )
+                fig_compare.update_layout(
+                    xaxis_title="Alpha F3,Alpha F4", 
+                    yaxis_title="Puissance(μV²)", 
+                    height=400
+                )
+                st.plotly_chart(fig_compare, use_container_width=True)
+
+                st.subheader("Résumé des Résultats")
+                results_summary = pd.DataFrame({
+                    "Puissance Alpha F3 (uV²)": [power_f3],
+                    "Puissance Alpha F4 (uV²)": [power_f4],
+                    "Résultat Prédiction": [label]
+                })
+                st.table(results_summary)
+
+elif menu == "Statistiques":
+    if os.path.exists(RESULTS_FILE):
+        df = pd.read_csv(RESULTS_FILE)
+        st.subheader("Répartition LIKE/DISLIKE")
+        fig1 = px.pie(df, names='prediction')
+        st.plotly_chart(fig1, use_container_width=True)
+
+        st.subheader("Distribution de confiance LIKE")
+        fig2 = px.histogram(df, x='confidence_like', nbins=20)
+        st.plotly_chart(fig2, use_container_width=True)
+
+        st.dataframe(df)
+        st.download_button(
+            label="Télécharger Résultats CSV",
+            data=df.to_csv(index=False).encode('utf-8'),
+            file_name='results.csv',
+            mime='text/csv'
         )
-        fig.update_layout(template="plotly_dark")
-        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Aucun résultat disponible pour l'instant.")
+
+# === FOOTER FINAL ===
+st.markdown("---")
+st.markdown(
+    "<div style='text-align: center; color: grey;'>"
+    "Réalisé avec ❤️ par <b>Ahmed Mlika</b> & <b>Omar Moussa</b><br>Université ISSATS Sousse"
+    "</div>",
+    unsafe_allow_html=True
+)
+
