@@ -65,6 +65,7 @@ a {
 footer {
     visibility: hidden;
 }
+
 /* Modification pour le mode clair */
 @media (prefers-color-scheme: light) {
     button {
@@ -80,7 +81,6 @@ footer {
 }
 </style>
 """, unsafe_allow_html=True)
-
 
 # === CONSTANTS ===
 FS = 250
@@ -255,103 +255,22 @@ elif menu == "Prédiction":
                 )
                 st.plotly_chart(fig_f3_filt, use_container_width=True)
 
-                st.subheader("Canal F4 Brut")
-                fig_f4_raw = px.line(y=f4_raw)
-                
-                fig_f4_raw.update_layout(
-                    xaxis_title="Temps (ms)", 
+                st.subheader("Analyse en Fréquences de F3")
+                fig_f3_freq = go.Figure()
+                fig_f3_freq.add_trace(go.Scatter(x=freqs_f3, y=fft_f3, mode='lines', name="FFT F3"))
+                fig_f3_freq.update_layout(
+                    xaxis_title="Fréquence (Hz)", 
                     yaxis_title="Amplitude (μV)", 
                     height=400
                 )
-                st.plotly_chart(fig_f4_raw, use_container_width=True)
-                
-                st.subheader("Canal F4 Filtré")
-                fig_f4_filt = px.line(y=f4_filt)
-                
-                fig_f4_filt.update_layout(
-                    xaxis_title="Temps (ms)", 
+                st.plotly_chart(fig_f3_freq, use_container_width=True)
+
+                st.subheader("Analyse en Fréquences de F4")
+                fig_f4_freq = go.Figure()
+                fig_f4_freq.add_trace(go.Scatter(x=freqs_f4, y=fft_f4, mode='lines', name="FFT F4"))
+                fig_f4_freq.update_layout(
+                    xaxis_title="Fréquence (Hz)", 
                     yaxis_title="Amplitude (μV)", 
                     height=400
                 )
-                st.plotly_chart(fig_f4_filt, use_container_width=True)
-
-                st.subheader("Spectre de Fréquence - Alpha F3")
-                fig_fft_f3 = px.line(x=freqs_f3, y=fft_f3)
-                fig_fft_f3.update_layout(title="FFT Alpha F3 (8-12 Hz)")
-                fig_fft_f3.update_xaxes(range=[7,13])
-                
-                fig_fft_f3.update_layout(
-                    xaxis_title="Frequence(Hz)", 
-                    yaxis_title="Puissance(μV²)", 
-                    height=400
-                )
-                st.plotly_chart(fig_fft_f3, use_container_width=True)
-
-                st.subheader("Spectre de Fréquence - Alpha F4")
-                fig_fft_f4 = px.line(x=freqs_f4, y=fft_f4)
-                fig_fft_f4.update_layout(title="FFT Alpha F4 (8-12 Hz)")
-                fig_fft_f4.update_xaxes(range=[7,13])
-                
-                fig_fft_f4.update_layout(
-                    xaxis_title="Frequence(Hz)", 
-                    yaxis_title="Puissance(μV²)", 
-                    height=400
-                )
-                st.plotly_chart(fig_fft_f4, use_container_width=True)
-                
-                dt = 1 / FS
-                power_f3 = np.trapz(f3_filt ** 2, dx=dt)
-                power_f4 = np.trapz(f4_filt ** 2, dx=dt)
-
-                st.subheader("Comparaison Puissance Alpha F3 vs F4")
-                fig_compare = px.bar(
-                    x=["Alpha F3", "Alpha F4"],
-                    y=[power_f3, power_f4],
-                    color=["Alpha F3", "Alpha F4"],
-                    title="Taux de puissance Alpha"
-                )
-                fig_compare.update_layout(
-                    xaxis_title="Alpha F3,Alpha F4", 
-                    yaxis_title="Puissance(μV²)", 
-                    height=400
-                )
-                st.plotly_chart(fig_compare, use_container_width=True)
-
-                st.subheader("Résumé des Résultats")
-                results_summary = pd.DataFrame({
-                    "Puissance Alpha F3 (uV²)": [power_f3],
-                    "Puissance Alpha F4 (uV²)": [power_f4],
-                    "Résultat Prédiction": [label]
-                })
-                st.table(results_summary)
-
-elif menu == "Statistiques":
-    if os.path.exists(RESULTS_FILE):
-        df = pd.read_csv(RESULTS_FILE)
-        st.subheader("Répartition LIKE/DISLIKE")
-        fig1 = px.pie(df, names='prediction')
-        st.plotly_chart(fig1, use_container_width=True)
-
-        st.subheader("Distribution de confiance LIKE")
-        fig2 = px.histogram(df, x='confidence_like', nbins=20)
-        st.plotly_chart(fig2, use_container_width=True)
-
-        st.dataframe(df)
-        st.download_button(
-            label="Télécharger Résultats CSV",
-            data=df.to_csv(index=False).encode('utf-8'),
-            file_name='results.csv',
-            mime='text/csv'
-        )
-    else:
-        st.info("Aucun résultat disponible pour l'instant.")
-
-# === FOOTER FINAL ===
-st.markdown("---")
-st.markdown(
-    "<div style='text-align: center; color: grey;'>"
-    "Réalisé avec ❤️ par <b>Ahmed Mlika</b> & <b>Omar Moussa</b><br>Université ISSATS Sousse"
-    "</div>",
-    unsafe_allow_html=True
-)
-
+                st.plotly_chart(fig_f4_freq, use_container_width=True)
